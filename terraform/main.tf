@@ -1,8 +1,8 @@
 terraform {
   backend "s3" {
-    bucket = "terraform-remote-demo"
-    key = "demo/state.tfstate"
-    region = "ca-central-1"
+    bucket  = "terraform-remote-demo"
+    key     = "demo/state.tfstate"
+    region  = "ca-central-1"
   }
 }
 
@@ -27,3 +27,15 @@ module "vpc" {
   enable_dns_support   = true
 }
 
+module "nacl" {
+  source = "./modules/nacl"
+  vpc_id = module.vpc.vpc_id
+  public_subnets = module.vpc.public_subnets
+  private_subnets = module.vpc.private_subnets
+  public_subnets_cidr_blocks = module.vpc.public_subnets_cidr_blocks
+}
+
+module "sg" {
+  source = "./modules/sg"
+  vpc_id = module.vpc.vpc_id
+}
