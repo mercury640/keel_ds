@@ -1,8 +1,29 @@
 import os
-from flask import Flask, render_template, request, redirect, url_for
+import sys
+import logging
 import psycopg2
+from flask import Flask, render_template, request, redirect, url_for
+from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
+
+# Setup rotating file handler
+log_handler = RotatingFileHandler('app.log', maxBytes=2 * 1024 * 1024, backupCount=2) 
+log_handler.setLevel(logging.INFO)
+log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+log_handler.setFormatter(log_formatter)
+
+# Add the log handler to Flask’s logger
+app.logger.addHandler(log_handler)
+app.logger.setLevel(logging.INFO)  # Set the logging level
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(log_formatter)
+app.logger.addHandler(console_handler)
+
+# Log request
+@app.before_request
+def log_request_info():
+    app.logger.info(f"Request: {request.method} {request.url} from {request.remote_addr}")
 
 # Get database credentials from environment variables
 DB_CONFIG = {
