@@ -3,8 +3,13 @@ variable "vpc_name" {}
 variable "vpc_cidr_block" {}
 variable "public_subnets" {}
 variable "private_subnets" {}
+
 variable "ec2_instance_type" {}
+variable "ec2_adder_name" {}
 variable "app_ports" {}
+variable "ami_id" {}
+variable "key_pair_name" {}
+variable "pub_key_loc" {}
 
 variable "ecr_adder" {}
 variable "ecr_display" {}
