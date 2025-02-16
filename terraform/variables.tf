@@ -4,12 +4,25 @@ variable "vpc_cidr_block" {}
 variable "public_subnets" {}
 variable "private_subnets" {}
 
+variable "log_group" {}
+variable "adder_logfile_path" {}
 variable "ec2_instance_type" {}
 variable "ec2_adder_name" {}
+variable "ec2_bastion_name" {}
 variable "app_ports" {}
+variable "app_adder_port" {}
+variable "app_display_port" {}
+variable "app_reset_port" {}
 variable "ami_id" {}
 variable "key_pair_name" {}
 variable "pub_key_loc" {}
+variable "adder_alb_name" {}
+variable "display_alb_name" {}
+variable "reset_alb_name" {}
+variable "target_type_instance" {}
+variable "target_type_ip" {}
+variable "ec2_platform_name" {}
+variable "fargate_platform_name" {}
 
 variable "ecr_adder" {}
 variable "ecr_display" {}
@@ -29,5 +42,6 @@ variable "rds_publicly_accessible" {}
 variable "rds_deletion_protection" {}
 variable "rds_skip_final_snapshot" {}
 variable "rds_db_name" {}
+variable "rds_db_port" {}
 variable "rds_schema_name" {}
 variable "rds_table_name" {}
