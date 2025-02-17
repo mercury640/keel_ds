@@ -9,6 +9,10 @@ terraform {
 locals {
   rds_master_cred         = jsondecode(data.aws_secretsmanager_secret_version.master_user.secret_string)
   rds_service_user_cred   = jsondecode(data.aws_secretsmanager_secret_version.service_user.secret_string)
+  rds_master_user_name    = local.rds_master_cred["username"]
+  rds_master_user_pass    = local.rds_master_cred["password"]
+  rds_svc_user_name       = local.rds_service_user_cred["username"]
+  rds_svc_user_pass       = local.rds_service_user_cred["password"]
   rds_endpoint            = module.rds.db_instance_endpoint
   ec2_instance_ids_map = {
     for idx, instance in module.ec2_adder :
@@ -37,12 +41,12 @@ module "vpc" {
   manage_default_security_group   = false
 }
 
-module "nacl" {
-  source                        = "./modules/nacl"
-  vpc_id                        = module.vpc.vpc_id
-  public_subnets                = module.vpc.public_subnets
-  private_subnets               = module.vpc.private_subnets
-  public_subnets_cidr_blocks    = module.vpc.public_subnets_cidr_blocks
+module "app_subnet" {
+  source = "./modules/app_subnet"
+  availability_zone = data.aws_availability_zones.available.names
+  vpc_id = module.vpc.vpc_id
+  app_public_subnet = var.app_public_subnet
+  igw_id = module.vpc.igw_id
 }
 
 module "sg" {
@@ -50,10 +54,7 @@ module "sg" {
   vpc_id = module.vpc.vpc_id
 }
 
-module "log_group" {
-  source  = "terraform-aws-modules/cloudwatch/aws//modules/log-group"
-  version = "~> 3.0"
-
+resource "aws_cloudwatch_log_group" "keel_ds" {
   name              = var.log_group
   retention_in_days = 7
 }
@@ -78,8 +79,8 @@ module "rds" {
   instance_class          = var.rds_instance_class
   allocated_storage       = var.rds_allocated_storage
   storage_encrypted       = var.rds_storage_encrypted
-  username                = local.rds_master_cred["username"]
-  password                = local.rds_master_cred["password"]
+  username                = local.rds_master_user_name
+  password                = local.rds_master_user_pass
   family                  = var.rds_parameter_group_family
   subnet_ids              = module.vpc.private_subnets
   vpc_security_group_ids  = [module.sg.private_sg]
@@ -95,7 +96,15 @@ module "rds" {
 
 }
 
-module "iam_log_role" {
+output "master_name" {
+  value = nonsensitive(local.rds_master_user_name)
+}
+
+output "master_pass" {
+  value = nonsensitive(local.rds_master_user_pass)
+}
+
+module "iam_ec2_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
   version = "~> 5.0"
 
@@ -105,13 +114,14 @@ module "iam_log_role" {
   trusted_role_services = ["ec2.amazonaws.com"]
 
   custom_role_policy_arns = [
-    "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+    "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
   ]
 }
 
 resource "aws_iam_instance_profile" "iam_ec2_adder_profile" {
   name = "ec2_adder_profile"
-  role = module.iam_log_role.iam_role_name
+  role = module.iam_ec2_role.iam_role_name
 }
 
 resource "aws_key_pair" "test_key" {
@@ -126,33 +136,29 @@ module "ec2_bastion" {
   name                   = var.ec2_bastion_name
   ami                    = var.ami_id
   instance_type          = var.ec2_instance_type
-  subnet_id              = module.vpc.private_subnets[0]
-  vpc_security_group_ids = [module.sg.public_bastion]
+  subnet_id              = module.app_subnet.application_subnets[0]
+  vpc_security_group_ids = [module.sg.application_sg]
+  associate_public_ip_address = true
   key_name               = aws_key_pair.test_key.key_name
-  user_data              = <<-EOF
-                                #!/bin/bash
-                                curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.3/2024-12-12/bin/linux/amd64/kubectl           
-                                ARCH=amd64
-                                PLATFORM=$(uname -s)_$ARCH
-                                curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
-                                tar xvf eksctl_Linux_amd64.tar.gz
-                                sudo chmod +x kubectl eksctl
-                                sudo mv kubectl eksctl /usr/local/bin
-
-                                sudo yum -y install postgresql15.x86_64
-                                PGPASSWORD=${local.rds_master_cred["password"]} psql -h ${local.rds_endpoint} -U master -d ${local.rds_master_cred["username"]} <<SQL
-                                CREATE SCHEMA IF NOT EXISTS ${var.rds_schema_name};
-                                CREATE TABLE IF NOT EXISTS ${var.rds_schema_name}.info (
-                                    id SERIAL PRIMARY KEY,
-                                    value INTEGER,
-                                    ip TEXT
-                                );
-                                CREATE USER ${local.rds_service_user_cred["username"]} WITH PASSWORD ${local.rds_service_user_cred["password"]};
-                                GRANT ALL PRIVILEGES ON DATABASE ${var.rds_db_name} TO ${local.rds_service_user_cred["username"]};
-                                GRANT USAGE, CREATE ON SCHEMA ${var.rds_schema_name} TO ${local.rds_service_user_cred["username"]};
-                                GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA ${var.rds_schema_name} TO ${local.rds_service_user_cred["username"]};
-                                SQL
-                                EOF
+  user_data              = join("\n", [
+    "#!/bin/bash",
+    "curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.3/2024-12-12/bin/linux/amd64/kubectl",
+    "ARCH=amd64",
+    "PLATFORM=$(uname -s)_$ARCH",
+    "curl -sLO https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz",
+    "tar xvf eksctl_Linux_amd64.tar.gz",
+    "sudo chmod +x kubectl eksctl",
+    "sudo mv kubectl eksctl /usr/local/bin",
+    "sudo yum -y install postgresql15.x86_64",
+    "PGPASSWORD=${local.rds_master_user_name} psql -h ${local.rds_endpoint} -U master -d ${local.rds_master_user_pass} <<SQL",
+    "CREATE SCHEMA IF NOT EXISTS ${var.rds_schema_name};",
+    "CREATE TABLE IF NOT EXISTS ${var.rds_schema_name}.info (id SERIAL PRIMARY KEY, value INTEGER, ip TEXT);",
+    "CREATE USER ${local.rds_svc_user_name} WITH PASSWORD ${local.rds_svc_user_pass};",
+    "GRANT ALL PRIVILEGES ON DATABASE ${var.rds_db_name} TO ${local.rds_svc_user_name};",
+    "GRANT USAGE, CREATE ON SCHEMA ${var.rds_schema_name} TO ${local.rds_svc_user_name};",
+    "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA ${var.rds_schema_name} TO ${local.rds_svc_user_name};",
+    "SQL"
+  ])
 }
 
 module "ec2_adder" {
@@ -165,48 +171,49 @@ module "ec2_adder" {
   instance_type               = var.ec2_instance_type
   iam_instance_profile        = aws_iam_instance_profile.iam_ec2_adder_profile.name
   subnet_id                   = module.vpc.private_subnets[count.index]
-  vpc_security_group_ids      = [module.sg.public_sg]
+  vpc_security_group_ids      = [module.sg.private_sg]
   key_name                    = aws_key_pair.test_key.key_name
   associate_public_ip_address = false
-  user_data                   =  <<-EOF
+  user_data                   = <<-EOF
                                 #!/bin/bash
                                 sudo yum update -y
                                 sudo yum install -y docker
                                 sudo systemctl start docker
                                 sudo systemctl enable docker
                                 sudo yum install -y amazon-cloudwatch-agent
-                                cat <<EOT | sudo tee /opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-config.json
-                                    {
-                                        "logs": {
-                                            "logs_collected": {
-                                                "files": {
-                                                    "collect_list": [
-                                                        {
-                                                            "file_path": "${var.adder_logfile_path}",
-                                                            "log_group_name": "${var.log_group}",
-                                                            "log_stream_name": "${var.ec2_adder_name}-${count.index + 1}",
-                                                            "timezone": "UTC"
-                                                        }
-                                                    ]
-                                                }
+                                cat <<EOT | sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+                                {
+                                    "logs": {
+                                        "logs_collected": {
+                                            "files": {
+                                                "collect_list": [
+                                                    {
+                                                        "file_path": "${var.adder_logfile_path}",
+                                                        "log_group_name": "${var.log_group}",
+                                                        "log_stream_name": "${var.ec2_adder_name}-${count.index + 1}",
+                                                        "timezone": "UTC"
+                                                    }
+                                                ]
                                             }
                                         }
                                     }
-                                    EOT
-                                sudo amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/cloudwatch-config.json -s
+                                }
+                                EOT
+                                sudo amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
                                 sudo systemctl enable amazon-cloudwatch-agent
 
-                                docker run -d --name adder -p 5001:5001 -e "DB_NAME=${var.rds_db_name}" -e "DB_USER=${local.rds_service_user_cred["username"]}" -e "DB_PASSWORD=${local.rds_service_user_cred["password"]}" -e "DB_HOST=${local.rds_endpoint}" -e "DB_PORT=${var.rds_db_port}"  adder
+                                docker run -d --name adder -p 5001:5001 -e "DB_NAME=${var.rds_db_name}" -e "DB_USER=${local.rds_svc_user_name}" -e "DB_PASSWORD=${local.rds_svc_user_name}" -e "DB_HOST=${local.rds_endpoint}" -e "DB_PORT=${var.rds_db_port}"  ${var.ecr_adder}
                                 EOF
 }
 
 module "ec2-alb" {
   source = "./modules/alb"
   vpc_id = module.vpc.vpc_id
-  security_groups = [module.sg.public_sg]
-  subnets = module.vpc.public_subnets
+  security_groups = [module.sg.application_sg]
+  subnets = module.app_subnet.application_subnets
   platform_type = var.ec2_platform_name
   app_port = var.app_adder_port
   target_type = var.target_type_instance
   instance_ids = local.ec2_instance_ids_map
 }
+

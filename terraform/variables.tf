@@ -3,6 +3,7 @@ variable "vpc_name" {}
 variable "vpc_cidr_block" {}
 variable "public_subnets" {}
 variable "private_subnets" {}
+variable "app_public_subnet" {}
 
 variable "log_group" {}
 variable "adder_logfile_path" {}
