@@ -1,0 +1,7 @@
+CREATE SCHEMA keel;
+
+CREATE TABLE keel.info (
+    id SERIAL PRIMARY KEY,
+    value INTEGER NOT NULL,
+    ip INET NOT NULL
+);
