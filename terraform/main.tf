@@ -13,7 +13,7 @@ locals {
   rds_master_user_pass    = local.rds_master_cred["password"]
   rds_svc_user_name       = local.rds_service_user_cred["username"]
   rds_svc_user_pass       = local.rds_service_user_cred["password"]
-  rds_endpoint            = module.rds.db_instance_endpoint
+  rds_address            = module.rds.db_instance_address
   ec2_instance_ids_map = {
     for idx, instance in module.ec2_adder :
     idx => instance.id
@@ -89,19 +89,12 @@ module "rds" {
   publicly_accessible     = var.rds_publicly_accessible
   skip_final_snapshot     = var.rds_deletion_protection
   deletion_protection     = var.rds_skip_final_snapshot
+  manage_master_user_password = false
 
   tags = {
     Name = "Keel PostgreSQL RDS"
   }
 
-}
-
-output "master_name" {
-  value = nonsensitive(local.rds_master_user_name)
-}
-
-output "master_pass" {
-  value = nonsensitive(local.rds_master_user_pass)
 }
 
 module "iam_ec2_role" {
@@ -140,25 +133,38 @@ module "ec2_bastion" {
   vpc_security_group_ids = [module.sg.application_sg]
   associate_public_ip_address = true
   key_name               = aws_key_pair.test_key.key_name
-  user_data              = join("\n", [
-    "#!/bin/bash",
-    "curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.3/2024-12-12/bin/linux/amd64/kubectl",
-    "ARCH=amd64",
-    "PLATFORM=$(uname -s)_$ARCH",
-    "curl -sLO https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz",
-    "tar xvf eksctl_Linux_amd64.tar.gz",
-    "sudo chmod +x kubectl eksctl",
-    "sudo mv kubectl eksctl /usr/local/bin",
-    "sudo yum -y install postgresql15.x86_64",
-    "PGPASSWORD=${local.rds_master_user_name} psql -h ${local.rds_endpoint} -U master -d ${local.rds_master_user_pass} <<SQL",
-    "CREATE SCHEMA IF NOT EXISTS ${var.rds_schema_name};",
-    "CREATE TABLE IF NOT EXISTS ${var.rds_schema_name}.info (id SERIAL PRIMARY KEY, value INTEGER, ip TEXT);",
-    "CREATE USER ${local.rds_svc_user_name} WITH PASSWORD ${local.rds_svc_user_pass};",
-    "GRANT ALL PRIVILEGES ON DATABASE ${var.rds_db_name} TO ${local.rds_svc_user_name};",
-    "GRANT USAGE, CREATE ON SCHEMA ${var.rds_schema_name} TO ${local.rds_svc_user_name};",
-    "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA ${var.rds_schema_name} TO ${local.rds_svc_user_name};",
-    "SQL"
-  ])
+  user_data              = <<-EOF
+                                #!/bin/bash
+                                LOGFILE="/home/ec2-user/test.log"
+                                exec > >(tee -a "$LOGFILE") 2>&1
+                                set -x
+                                echo "Script started at $(date)"
+                                echo "Executing commands..."
+                                curl -O https://s3.us-west-2.amazonaws.com/amazon-eks/1.31.3/2024-12-12/bin/linux/amd64/kubectl           
+                                ARCH=amd64
+                                PLATFORM=$(uname -s)_$ARCH
+                                curl -sLO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$PLATFORM.tar.gz"
+                                tar xvf eksctl_Linux_amd64.tar.gz
+                                sudo chmod +x kubectl eksctl
+                                sudo mv kubectl eksctl /usr/local/bin
+                                sudo yum -y install postgresql15.x86_64
+                                PGPASSWORD=${local.rds_master_user_pass} psql -h ${local.rds_address} -U master -d ${local.rds_svc_user_name} <<SQL
+                                CREATE SCHEMA IF NOT EXISTS ${var.rds_schema_name};
+                                CREATE TABLE IF NOT EXISTS ${var.rds_schema_name}.info (
+                                    id SERIAL PRIMARY KEY,
+                                    value INTEGER,
+                                    ip TEXT
+                                );
+                                CREATE USER ${local.rds_svc_user_name} WITH PASSWORD '${local.rds_svc_user_pass}';
+                                GRANT ALL PRIVILEGES ON DATABASE ${var.rds_db_name} TO ${local.rds_svc_user_name};
+                                GRANT USAGE, CREATE ON SCHEMA ${var.rds_schema_name} TO ${local.rds_svc_user_name};
+                                GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA ${var.rds_schema_name} TO ${local.rds_svc_user_name};
+                                GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA ${var.rds_schema_name} TO ${local.rds_svc_user_name};
+                                SQL
+                                set +x
+                                echo "Script finished at $(date)"
+                                EOF
+  depends_on = [module.rds]
 }
 
 module "ec2_adder" {
@@ -176,6 +182,11 @@ module "ec2_adder" {
   associate_public_ip_address = false
   user_data                   = <<-EOF
                                 #!/bin/bash
+                                LOGFILE="/home/ec2-user/testt.log"
+                                exec > >(tee -a "$LOGFILE") 2>&1
+                                set -x
+                                echo "Script started at $(date)"
+                                echo "Executing commands..."
                                 sudo yum update -y
                                 sudo yum install -y docker
                                 sudo systemctl start docker
@@ -202,7 +213,9 @@ module "ec2_adder" {
                                 sudo amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
                                 sudo systemctl enable amazon-cloudwatch-agent
 
-                                docker run -d --name adder -p 5001:5001 -e "DB_NAME=${var.rds_db_name}" -e "DB_USER=${local.rds_svc_user_name}" -e "DB_PASSWORD=${local.rds_svc_user_name}" -e "DB_HOST=${local.rds_endpoint}" -e "DB_PORT=${var.rds_db_port}"  ${var.ecr_adder}
+                                docker run -d --name adder -p 5001:5001 -e "DB_NAME=${var.rds_db_name}" -e "DB_USER=${local.rds_svc_user_name}" -e "DB_PASSWORD=${local.rds_svc_user_pass}" -e "DB_HOST=${local.rds_address}" -e "DB_PORT=${var.rds_db_port}"  ${var.ecr_adder}
+                                set +x
+                                echo "Script finished at $(date)"
                                 EOF
 }
 
