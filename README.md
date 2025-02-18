@@ -44,3 +44,4 @@ Need-To-Improve:
 1. For Terraform, need to use separated variables files for different environments such as dev, staging and prod when apply the change.
 2. Application Load Balancer should enable https.
 3. Password of RDS should be managed by Secret Manager and rotated periodically.
+4. Enable CloudTrail Logging and VPC Flow Log and keep logs in S3 bucket
