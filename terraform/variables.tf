@@ -3,6 +3,7 @@ variable "vpc_name" {}
 variable "vpc_cidr_block" {}
 variable "public_subnets" {}
 variable "private_subnets" {}
+variable "app_public_subnet" {}
 
 variable "log_group" {}
 variable "adder_logfile_path" {}
@@ -28,6 +29,9 @@ variable "ecr_adder" {}
 variable "ecr_display" {}
 variable "ecr_reset" {}
 
+variable "display_service_name" {}
+variable "reset_service_name" {}
+
 variable "rds_identifier" {}
 variable "rds_engine" {}
 variable "rds_engine_ver" {}
@@ -45,3 +49,6 @@ variable "rds_db_name" {}
 variable "rds_db_port" {}
 variable "rds_schema_name" {}
 variable "rds_table_name" {}
+
+variable "db_svc_user_from_secret_manager_arn" {}
+variable "db_svc_pass_from_secret_manager_arn" {}
