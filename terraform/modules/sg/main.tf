@@ -89,6 +89,19 @@ resource "aws_security_group" "private_sg" {
     self        = true
     security_groups = [aws_security_group.application_sg.id]
   }
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    self        = true
+    security_groups = [aws_security_group.application_sg.id]
+  }
+  ingress {
+    from_port   = 10250
+    to_port     = 10250
+    protocol    = "tcp"
+    self        = true
+  }
   egress {
     from_port   = 0
     to_port     = 0

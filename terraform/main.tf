@@ -23,7 +23,6 @@ locals {
 # Get Availability Zones
 data "aws_availability_zones" "available" {}
 
-# Create VPC
 module "vpc" {
   source                          = "terraform-aws-modules/vpc/aws"
   version                         = "5.19.0"
@@ -41,6 +40,7 @@ module "vpc" {
   manage_default_security_group   = false
 }
 
+# Subnets for exposing service to internet by loadbalancers 
 module "app_subnet" {
   source = "./modules/app_subnet"
   availability_zone = data.aws_availability_zones.available.names
@@ -54,17 +54,16 @@ module "sg" {
   vpc_id = module.vpc.vpc_id
 }
 
+# Create log group
 resource "aws_cloudwatch_log_group" "keel_ds" {
   name              = var.log_group
   retention_in_days = 7
 }
 
-# Fetch master password from AWS Secrets Manager
+# Get admin credential of database stored in secret manager
 data "aws_secretsmanager_secret_version" "master_user" {
   secret_id = "rds_master_cred"
 }
-
-# Fetch service user password from AWS Secrets Manager
 data "aws_secretsmanager_secret_version" "service_user" {
   secret_id = "keel_rds_cred"
 }
@@ -97,6 +96,24 @@ module "rds" {
 
 }
 
+resource "aws_iam_policy" "cloudwatch_logs" {
+  name = "cloudwatch-logs-policy"
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Resource = "arn:aws:logs:ca-central-1:454451034868:log-group:${var.log_group}:*"
+      }
+    ]
+  })
+}
+
 module "iam_ec2_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
   version = "~> 5.0"
@@ -108,13 +125,23 @@ module "iam_ec2_role" {
 
   custom_role_policy_arns = [
     "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
-    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+    aws_iam_policy.cloudwatch_logs.arn
   ]
 }
 
 resource "aws_iam_instance_profile" "iam_ec2_adder_profile" {
   name = "ec2_adder_profile"
   role = module.iam_ec2_role.iam_role_name
+}
+
+data "aws_iam_role" "ecs_task_execution" {
+  name = "ecsTaskExecutionRole"
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch_logs" {
+  role       = data.aws_iam_role.ecs_task_execution.name
+  policy_arn = aws_iam_policy.cloudwatch_logs.arn
 }
 
 resource "aws_key_pair" "test_key" {
@@ -220,13 +247,38 @@ module "ec2_adder" {
 }
 
 module "ec2-alb" {
-  source = "./modules/alb"
-  vpc_id = module.vpc.vpc_id
+  source          = "./modules/alb"
+  vpc_id          = module.vpc.vpc_id
   security_groups = [module.sg.application_sg]
-  subnets = module.app_subnet.application_subnets
-  platform_type = var.ec2_platform_name
-  app_port = var.app_adder_port
-  target_type = var.target_type_instance
-  instance_ids = local.ec2_instance_ids_map
+  subnets         = module.app_subnet.application_subnets
+  platform_type   = var.ec2_adder_name
+  app_port        = var.app_adder_port
+  target_type     = var.target_type_instance
+  instance_ids    = local.ec2_instance_ids_map
 }
 
+module "ecs_display" {
+  source                  = "./modules/ecs"
+  vpc_id                  = module.vpc.vpc_id
+  display_service_name    = var.display_service_name
+  db_name                 = var.rds_db_name
+  db_host                 = local.rds_address
+  db_port                 = var.rds_db_port
+  db_user_from            = var.db_svc_user_from_secret_manager_arn
+  db_pass_from            = var.db_svc_pass_from_secret_manager_arn
+  ecs_subnets             = module.vpc.private_subnets
+  alb_subnets             = module.app_subnet.application_subnets
+  ecs_security_group_ids  = [module.sg.private_sg]
+  alb_security_group_ids  = [module.sg.application_sg]
+  execution_role_arn      = data.aws_iam_role.ecs_task_execution.arn
+  log_group               = var.log_group
+}
+
+module "eks_reset" {
+  source = "./modules/eks"
+  vpc_id = module.vpc.vpc_id
+  cluster_name = var.reset_service_name
+  cluster_subnets = module.vpc.private_subnets
+  alb_security_groups = [module.sg.application_sg]
+  alb_subnets = module.app_subnet.application_subnets
+}

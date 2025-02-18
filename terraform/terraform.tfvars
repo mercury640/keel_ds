@@ -18,6 +18,8 @@ ec2_bastion_name            = "bastion_server"
 log_group                   = "/keel_ds"
 adder_logfile_path          = "/var/lib/docker/containers/*/*.log"
 adder_alb_name              = "adder-alb"
+display_service_name        = "display"
+reset_service_name          = "reset"
 display_alb_name            = "display-alb"
 reset_alb_name              = "reset-alb"
 target_type_instance        = "instance"
@@ -46,3 +48,6 @@ rds_replica_count               = 1
 rds_publicly_accessible         = false
 rds_deletion_protection         = false
 rds_skip_final_snapshot         = true
+
+db_svc_user_from_secret_manager_arn = "arn:aws:secretsmanager:ca-central-1:454451034868:secret:keel_rds_cred-B87Zhx:username::"
+db_svc_pass_from_secret_manager_arn = "arn:aws:secretsmanager:ca-central-1:454451034868:secret:keel_rds_cred-B87Zhx:password::"
