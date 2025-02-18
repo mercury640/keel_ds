@@ -24,17 +24,18 @@ Description
    The traffic from app_subnets to private subnets is managed by secrity groups.
 
 3. EC2 Instance:
-   Bastion server is located in app_subnets which could be reached from internet. When it's being created, the EC2 key pair is created based on the public key of the machine which Terraform running on. It coul dbe accessed from internet by command ssh -i "key.pem" ec2-user@xxx.xxx.xxx.xxx.
+   Bastion server is located in app_subnets which could be reached from internet. When it's being created, the EC2 key pair is created based on the public key of the machine which Terraform running on.
+   It coul dbe accessed from internet by command ssh -i "key.pem" ec2-user@xxx.xxx.xxx.xxx.
 
    EC2 instances for applications are located in private subnets without public IP.  They could be accessed from Bastion server via private IP and key pair.
 
-4. Service adder:
+5. Service adder:
    This service is deployed in a group of EC2 instances with docker in private subnets accross 2 AZs.  It's exposed by an ALB located in application subnets.
 
-5. Service display:
+6. Service display:
    It's running on ECS with Fargate to privide serverless service in private subnets which accross 3 AZs. It's exposed by an ALB located in application subnets
 
-6. Service reset:
+7. Service reset:
    It's running on EKS with node group to privide service in private subnets which accross 3 AZs. It's exposed by an ALB located in application subnets and ingress-nginx controller.
    HPA is enable to scale up & down the sum of pods for deployment based on CPU usage.
 
