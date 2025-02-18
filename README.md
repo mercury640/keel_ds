@@ -11,9 +11,9 @@ prerequisites:
 Description
 1. Docker images:
    All 3 applications are built up with docker and images are available in public registry
-   adder : public.ecr.aws/k3h4d7k6/ag/adder
-   display : public.ecr.aws/k3h4d7k6/ag/display
-   reset : public.ecr.aws/k3h4d7k6/ag/reset
+   - adder : public.ecr.aws/k3h4d7k6/ag/adder
+   - display : public.ecr.aws/k3h4d7k6/ag/display
+   - reset : public.ecr.aws/k3h4d7k6/ag/reset
 
 2. VPC:
    The VPC includes 3 group subnets, each of them crosses 3 AZs for high availablility
