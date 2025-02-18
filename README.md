@@ -3,9 +3,10 @@
 prerequisites:
 1. Ensure the environment which terraform running has enough permission
 2. S3 bucket to store Terraform state files
-3. In AWS Secret Manager, create 2 secrets for database master credential and service user credential. Both of secrets have keys username="" and password=""
+3. In AWS Secret Manager, create 2 secrets for database master credential and service user credential.
+   Both of secrets have keys username="" and password=""
    This two secrets are refered by root main.tf (locals) to init rds
-4. Ensure this is a public key in this location "~/.ssh/id_rsa.pub". It's required when creating EC2 instances
+5. Ensure this is a public key in this location "~/.ssh/id_rsa.pub". It's required when creating EC2 instances
 
 Description
 1. Docker images:
