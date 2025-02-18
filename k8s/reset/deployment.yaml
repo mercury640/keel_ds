@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reset
+  labels:
+    app: reset
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: reset
+  template:
+    metadata:
+      labels:
+        app: reset
+    spec:
+      containers:
+        - name: reset
+          image: public.ecr.aws/k3h4d7k6/ag/reset
+          ports:
+            - containerPort: 5003
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
