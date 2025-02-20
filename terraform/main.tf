@@ -40,15 +40,6 @@ module "vpc" {
   manage_default_security_group   = false
 }
 
-# Subnets for exposing service to internet by loadbalancers 
-module "app_subnet" {
-  source = "./modules/app_subnet"
-  availability_zone = data.aws_availability_zones.available.names
-  vpc_id = module.vpc.vpc_id
-  app_public_subnet = var.app_public_subnet
-  igw_id = module.vpc.igw_id
-}
-
 module "sg" {
   source = "./modules/sg"
   vpc_id = module.vpc.vpc_id
@@ -156,10 +147,11 @@ module "ec2_bastion" {
   name                   = var.ec2_bastion_name
   ami                    = var.ami_id
   instance_type          = var.ec2_instance_type
-  subnet_id              = module.app_subnet.application_subnets[0]
-  vpc_security_group_ids = [module.sg.application_sg]
+  subnet_id              = module.vpc.public_subnets[0]
+  vpc_security_group_ids = [module.sg.public_sg]
   associate_public_ip_address = true
   key_name               = aws_key_pair.test_key.key_name
+  depends_on             = [module.rds]
   user_data              = <<-EOF
                                 #!/bin/bash
                                 LOGFILE="/home/ec2-user/test.log"
@@ -191,7 +183,6 @@ module "ec2_bastion" {
                                 set +x
                                 echo "Script finished at $(date)"
                                 EOF
-  depends_on = [module.rds]
 }
 
 module "ec2_adder" {
@@ -207,6 +198,7 @@ module "ec2_adder" {
   vpc_security_group_ids      = [module.sg.private_sg]
   key_name                    = aws_key_pair.test_key.key_name
   associate_public_ip_address = false
+  depends_on                  = [module.ec2_bastion]
   user_data                   = <<-EOF
                                 #!/bin/bash
                                 LOGFILE="/home/ec2-user/testt.log"
@@ -249,8 +241,8 @@ module "ec2_adder" {
 module "ec2-alb" {
   source          = "./modules/alb"
   vpc_id          = module.vpc.vpc_id
-  security_groups = [module.sg.application_sg]
-  subnets         = module.app_subnet.application_subnets
+  security_groups = [module.sg.public_sg]
+  subnets         = module.vpc.public_subnets
   platform_type   = var.ec2_adder_name
   app_port        = var.app_adder_port
   target_type     = var.target_type_instance
@@ -267,18 +259,20 @@ module "ecs_display" {
   db_user_from            = var.db_svc_user_from_secret_manager_arn
   db_pass_from            = var.db_svc_pass_from_secret_manager_arn
   ecs_subnets             = module.vpc.private_subnets
-  alb_subnets             = module.app_subnet.application_subnets
+  alb_subnets             = module.vpc.public_subnets
   ecs_security_group_ids  = [module.sg.private_sg]
-  alb_security_group_ids  = [module.sg.application_sg]
+  alb_security_group_ids  = [module.sg.public_sg]
   execution_role_arn      = data.aws_iam_role.ecs_task_execution.arn
   log_group               = var.log_group
+  depends_on               = [module.ec2_bastion]
 }
 
 module "eks_reset" {
-  source = "./modules/eks"
-  vpc_id = module.vpc.vpc_id
-  cluster_name = var.reset_service_name
-  cluster_subnets = module.vpc.private_subnets
-  alb_security_groups = [module.sg.application_sg]
-  alb_subnets = module.app_subnet.application_subnets
+  source                = "./modules/eks"
+  vpc_id                = module.vpc.vpc_id
+  cluster_name          = var.reset_service_name
+  cluster_subnets       = module.vpc.private_subnets
+  alb_security_groups   = [module.sg.public_sg]
+  alb_subnets           = module.vpc.public_subnets
+  depends_on            = [module.ec2_bastion]
 }
